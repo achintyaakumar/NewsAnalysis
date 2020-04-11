@@ -1,0 +1,15 @@
+---
+title: "News Analysis"
+output: html_notebook
+---
+Install the newsanchor package using "install.packages("newsanchor")"
+```{r}
+library(newsanchor)
+```
+Make sure you've saved the api key before you move on.
+"Sys.setenv(NEWS_API_KEY="Your_Key")"
+```{r}
+# get headlines published by the Washington Post
+results <- get_headlines(sources = "the-washington-post", 
+  api_key = Sys.getenv("NEWS_API_KEY"))
+```
