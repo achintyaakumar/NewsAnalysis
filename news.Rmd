@@ -1,48 +1,74 @@
 ---
 title: "News Analysis"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
-Install the newsanchor package using "install.packages("newsanchor")"
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+## Introduction
+One thing we found very interesting how differently the news is reported amongst media companies of different countries. In this project we try to filter through these headlines to understand the news better. This project is split into four major portions: text analysis, entity detection, sentiment analysis and fake news analysis. 
+
 ```{r}
+#Install the newsanchor package using "install.packages("newsanchor")"
 library(newsanchor)
-```
-Make sure you've saved the api key before you move on.
-"Sys.setenv(NEWS_API_KEY="Your_Key")"
-```{r}
-# get headlines for today
-results_us_26 <- get_headlines_all(country = "us", api_key = Sys.getenv("NEWS_API_KEY"))
-results_in_26 <- get_headlines_all(country = "in", api_key = Sys.getenv("NEWS_API_KEY"))
-```
-Sentiment analysis libraries
-install.packages("textdata")
-```{r}
-library(dplyr) #Data manipulation (also included in the tidyverse package)
+library(dplyr) #Data manipulation 
 library(tidytext) #Text mining
 library(tidyr) #Spread, separate, unite, text mining (also included in the tidyverse package)
-library(widyr) #Use for pairwise correlation
+library(widyr)
 library(textdata)
 library(ggplot2)
+library(knitr)
+library(evaluate)
 ```
 
 ```{r}
-results_group <- results_in_14
-results_group %>% group_by(results_in_14$results_df$name) %>% count() 
+# get headlines for today. Set API key before running this chunk. 
+#results_us_4 <- get_headlines_all(country = "us", api_key = Sys.getenv("NEWS_API_KEY"))
+#results_in_4 <- get_headlines_all(country = "in", api_key = Sys.getenv("NEWS_API_KEY"))
 ```
-TEXT ANALYSIS
+
+```{r}
+#Combine all the daily news articles into one dataframe.
+#news_us <- rbind(results_us_14$results_df, results_us_16$results_df, results_us_17$results_df, results_us_18$results_df, results_us_2$results_df, results_us_20$results_df, results_us_22$results_df, results_us_26$results_df, results_us_27$results_df, results_us_4$results_df)
+#keep <- c("title", "description", "name")
+#news_us <- news_us[keep] #remove extra columns
+#news_us <- na.omit(mutate_all(news_us, ~ifelse(. %in% c("N/A", "null", ""),  NA, .))) #remove empty or NA rows
+#news_india <- rbind(results_in_14$results_df, results_in_16$results_df, results_in_17$results_df, results_in_18$results_df, results_in_2$results_df, results_in_20$results_df, results_in_22$results_df, results_in_26$results_df, results_in_27$results_df, results_in_4$results_df)
+#write.csv(news_us,"C:/Users/Achintya/Downloads/cmder/news_us.csv", row.names = TRUE)
+#write.csv(news_india,"C:/Users/Achintya/Downloads/cmder/news_india.csv", row.names = TRUE)
+```
+
+```{r}
+#Load csv files
+news_us <- read.csv("news_us.csv")
+keep <- c("title", "description", "name")
+news_us <- news_us[keep] #remove extra columns
+
+news_india <- read.csv("news_india.csv")
+keep <- c("title", "description", "name")
+news_india <- news_india[keep] #remove extra columns
+```
+
+## Section 1: Text Analysis
+In this section, we do some preliminary text analysis to understand which words and phrases are used in these news articles. We used the udpipe library to annotate the news description we have to identify nouns, adjectives and verbs. The most common of them are displayed on the charts below: 
+
 ```{r}
 library(udpipe)
 library(lattice)
 model <- udpipe_download_model(language = "english")
 udmodel_english <- udpipe_load_model(model$file_model)
-s <- udpipe_annotate(udmodel_english, results_us_14$results_df$description)
+s <- udpipe_annotate(udmodel_english, news_us$description)
 x <- data.frame(s)
 
 stats <- txt_freq(x$upos)
 stats$key <- factor(stats$key, levels = rev(stats$key))
-barchart(key ~ freq, data = stats, col = "yellow", 
-         main = "UPOS (Universal Parts of Speech)\n frequency of occurrence", 
-         xlab = "Freq")
 ```
+
+The most nouns were the coronavirus and pandemic which makes sense because many articles about the coronavirus pandemic have been published lately.
 
 ```{r}
 ## NOUNS
@@ -53,6 +79,8 @@ barchart(key ~ freq, data = head(stats, 20), col = "cadetblue",
          main = "Most occurring nouns", xlab = "Freq")
 ```
 
+The most common adjectives are new and first which are related to the coronavirus pandemic as well.
+
 ```{r}
 ## ADJECTIVES
 stats <- subset(x, upos %in% c("ADJ")) 
@@ -61,55 +89,187 @@ stats$key <- factor(stats$key, levels = rev(stats$key))
 barchart(key ~ freq, data = head(stats, 20), col = "purple", 
          main = "Most occurring adjectives", xlab = "Freq")
 ```
+
+Most common verbs are said and says which tells us that a lot of these articles were conveying information provided by other entities.
+
 ```{r}
 ## NOUNS
 stats <- subset(x, upos %in% c("VERB")) 
 stats <- txt_freq(stats$token)
 stats$key <- factor(stats$key, levels = rev(stats$key))
-barchart(key ~ freq, data = head(stats, 20), col = "gold", 
+barchart(key ~ freq, data = head(stats, 20), col = "grey", 
          main = "Most occurring Verbs", xlab = "Freq")
 ```
-RAKE is one of the most popular (unsupervised) algorithms for extracting keywords in Information retrieval. RAKE short for Rapid Automatic Keyword Extraction algorithm, is a domain independent keyword extraction algorithm which tries to determine key phrases in a body of text by analyzing the frequency of word appearance and its co-occurrence with other words in the text.
+
+We use RAKE to identify keywords in our news descriptions. RAKE is a domain independent keyword extraction algorithm which tries to determine key phrases in a body of text by analyzing the frequency of word appearance and its co-occurrence with other words in the text. The most common keywords were Trump administration and federal guidelines which also are related to the pandemic. Overall, we can see that most of these articles are talking about the coronavirus pandemic.
+
 ```{r}
 ## Using RAKE
 stats <- keywords_rake(x = x, term = "lemma", group = "doc_id", 
                        relevant = x$upos %in% c("NOUN", "ADJ"))
 stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
-barchart(key ~ rake, data = head(subset(stats, freq > 1), 20), col = "red", #change the frequency number
+barchart(key ~ rake, data = head(subset(stats, freq > 1), 20), #change the frequency number
          main = "Keywords identified by RAKE", 
          xlab = "Rake")
 ```
+## Section Two: Entity Detection
+In this section we analyze descriptions to understand who the news articles are about. First, we did some data preprocessing to removing title, prefixes and suffixes and used the entity package to find which organizations or people are mentioned in the article. After getting a list of all the entities mentioned in the article, we figure out which entities were mentioned the most in these articles. 
 
-In English (or probably in many languages), Simple a noun and a verb can form a phrase. Like, Dog barked — with the noun Dog and Barked, we can understand the context of the sentence. Reverse-engineering the same with this headlines data, let us bring out top phrases - that are just keywords/topics
 ```{r}
-## Using a sequence of POS tags (noun phrases / verb phrases)
-x$phrase_tag <- as_phrasemachine(x$upos, type = "upos")
-stats <- keywords_phrases(x = x$phrase_tag, term = tolower(x$token), 
-                          pattern = "(A|N)*N(P+D*(A|N)*N)*", 
-                          is_regex = TRUE, detailed = FALSE)
-#stats <- subset(stats, ngram > 1 & freq > 3)
-stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
-barchart(key ~ freq, data = head(stats, 20), col = "magenta", 
-         main = "Keywords - simple noun phrases", xlab = "Frequency")
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load_gh("trinker/entity")
+```
+We plot the all people mentioned in these news articles more than two times. Based on the graph, we can see that Donald Trump followed by Anthony Fauci and Joe Biden were most mentioned in the articles, which makes sense given how they have been in the news recently.
+
+```{r}
+library(entity)
+library(tm)
+library(NLP)
+
+stopwords = c("Inc","inc","Inc's","co","Co","Inc.","Co.","LLC","Corporation","Corp","&", "Dr.", "Dr", "Mr.", "Mr", "Mrs.", "Mrs", "Ç", "")
+#x  <- news_us$description        #Company column data
+#x  <-  removeWords(x,stopwords)     #Remove stopwords
+
+
+news_us$description <- gsub(paste0(stopwords,collapse = "|"),"", news_us$description)
+person <- person_entity(news_us$description)
+organizations1 <- organization_entity(news_us$description)
+plot(person, min = 1.5)
 ```
 
-TWITTER. 
-setup_twitter_oauth("API key", "API secret", "Access token", "Private access token")
+The most mentioned entity was the NFL, followed by the US and NASA. There were a lot of articles published about the NFL drafts recently, and we can also notice a lot of names of the NFL teams in the plot too.
+
 ```{r}
+plot(organizations1, min = 2)
+```
+
+## Section Three: Sentiment Analysis
+In this section we use the data of entities we gathered from the last section and assign sentiment scores to them. We create a dataframe containing the sentiment scores of the articles and join the entity list we created to them to associate sentiment scores with entities. The result data is displayed below.
+
+```{r}
+library(syuzhet)
+news_us$organizations1 = organizations1[1:369]
+results <- do.call("rbind", apply(news_us, 1, function(item){
+    if(!is.null(item$organizations1[[1]])) cbind(item$organizations1, get_sentiment(item$description))
+}))
+#results <- as.list(as.data.frame(results))
+#results[, 2]
+#class(results)
+results <- aggregate(as.numeric(results[, 2]), list(results[, 1]), mean)
+```
+
+### Highest sentiment rating for organizations
+
+```{r}
+#Highest sentiment rating for organizations
+results <- results[order(-results$x),]
+print(head(results, n=10))
+```
+
+### Lowest sentiment rating for organizations
+
+```{r}
+results <- results[order(results$x),]
+print(head(results, n=10))
+```
+
+```{r}
+news_us$person = person[1:369]
+results <- do.call("rbind", apply(news_us, 1, function(item){
+    if(!is.null(item$person[[1]])) cbind(item$person, get_sentiment(item$description))
+}))
+results <- aggregate(as.numeric(results[, 2]), list(results[, 1]), mean)
+```
+
+### Highest sentiment rating for individuals
+
+```{r}
+results <- results[order(-results$x),]
+print(head(results, n=10))
+```
+
+### Lowest sentiment rating for individuals
+
+```{r}
+results <- results[order(results$x),]
+print(head(results, n=10))
+```
+
+Since Donald Trump was the entity mentioned most in news articles, we're going to analyze the sentiment score of Donald Trump in the US, India and Twitter so see if they are consistent. We use four sentiment methods: syuzhet, bing, afinn and nrc and plot them side by side to see if they agree.
+
+```{r}
+syu <- 0
+bing <- 0
+afinn <- 0
+nrc <- 0
+news_us$description <- as.character(news_us$description) #change description to a character vector
+
+t1 <- grep("Trump | Donald Trump", news_us$description)
+for(i in t1){
+  syu <- syu + get_sentiment(news_us$description[i], method = "syuzhet")
+  bing <- bing + get_sentiment(news_us$description[i], method = "bing")
+  afinn <- afinn + get_sentiment(news_us$description[i], method = "afinn")
+  nrc <- nrc + get_sentiment(news_us$description[i], method = "nrc")
+}
+source <- "US News"
+syu <- syu/length(t1)
+bing <- bing/length(t1)
+afinn <- afinn/length(t1)
+nrc <- nrc/length(t1)
+trump_us <- data.frame(source, syu, bing, afinn, nrc)
+```
+
+```{r}
+syu <- 0
+bing <- 0
+afinn <- 0
+nrc <- 0
+news_india$description <- as.character(news_india$description) #change description to a character vector
+
+t1 <- grep("Trump | Donald Trump", news_india$description)
+for(i in t1){
+  syu <- syu + get_sentiment(news_india$description[i], method = "syuzhet")
+  bing <- bing + get_sentiment(news_india$description[i], method = "bing")
+  afinn <- afinn + get_sentiment(news_india$description[i], method = "afinn")
+  nrc <- nrc + get_sentiment(news_india$description[i], method = "nrc")
+}
+source <- "India News"
+syu <- syu/length(t1)
+bing <- bing/length(t1)
+afinn <- afinn/length(t1)
+nrc <- nrc/length(t1)
+trump_india <- data.frame(source, syu, bing, afinn, nrc)
+```
+
+```{r results='hide'}
 library(twitteR)
 library(devtools)
 library(rtweet)
 library(httk)
 library(httr)
-
-twitter_token <- create_token(
-app = appname,
-consumer_key = key,
-consumer_secret = secret)
+library(plyr)
+library(erer)
+setup_twitter_oauth("Z19KgKizE9OlZHDOphLINua7m", "7ZkuB5tHkZyEy3HS8uAAZ7qgsv3aYk1ECp3tIjZHtaoZouRVEa", "738337291408543744-pQaLxKx5a3WJi2qtIs9UnYjacz2NTuV", "gX9RrjBW8PYhV6EyxUSUQj1f3s4wEng4YLp13MKKJl5V7")
+#appname <- "NewsAnalysis"
+#key <- "Z19KgKizE9OlZHDOphLINua7m"
+#secret <- "7ZkuB5tHkZyEy3HS8uAAZ7qgsv3aYk1ECp3tIjZHtaoZouRVEa"
+#twitter_token <- create_token(
+#app = appname,
+#consumer_key = key,
+#consumer_secret = secret)
 # harvest some tweets
-some_tweets = searchTwitter("starbucks", n=100, lang="en")
+some_tweets = searchTwitter("Donald Trump", n=50, lang="en")
 
-# get the text
+#tweets.df = ldply(some_tweets, function(t) t$toDataFrame())
+#write.csv(tweets.df, file = "some_tweets.csv")
+#write.list(some_tweets, some_tweets, t.name = NULL, row.names = TRUE)
+#stweets <- split(tweets.df, seq(nrow(tweets.df)))
+#stweets <- setNames(split(tweets.df, seq(nrow(tweets.df))), rownames(tweets.df))
+
+#capture.output(summary(some_tweets), file = "tweets.txt")
+#abc <- read.delim("tweets.txt")
+
+#some_tweets1 <- read.csv("some_tweets.csv")
 some_txt = sapply(some_tweets, function(x) x$getText())
 ```
 
@@ -127,7 +287,6 @@ some_txt = gsub("http\\w+", "", some_txt)
 # remove unnecessary spaces
 some_txt = gsub("[ \t]{2,}", "", some_txt)
 some_txt = gsub("^\\s+|\\s+$", "", some_txt)
-
 # define "tolower error handling" function 
 try.error = function(x)
 {
@@ -143,29 +302,302 @@ try.error = function(x)
 }
 # lower case using try.error with sapply 
 some_txt = sapply(some_txt, try.error)
-
 # remove NAs in some_txt
 some_txt = some_txt[!is.na(some_txt)]
 names(some_txt) = NULL
 ```
+
 ```{r}
 library(syuzhet)
 syu <- get_sentiment(some_txt, method = "syuzhet")
 bing <- get_sentiment(some_txt, method = "bing")
 afinn <- get_sentiment(some_txt, method = "afinn")
 nrc <- get_sentiment(some_txt, method = "nrc")
-sentiments_twitter_i <- data.frame(syu, bing, afinn, nrc)
+syu <- sum(syu)/100
+bing <- sum(bing)/100
+afinn <- sum(afinn)/100
+nrc <- sum(nrc)/100
+source <- "Twitter"
+trump_twitter <- data.frame(source, syu, bing, afinn, nrc)
 ```
 
-ENTITY DETECTION
+After creating dataframes of news articles mentioning Donald Trump in India and the US, and tweet gathered from the internet, we average out the sentiment associated with Donald Trump from different sources. Based on our result, we can see Twitter has a severe negative bias against Donald Trump compared to the news articles. We can also see that news articles in India had a higher average sentiment score for Donald Trump.
+
 ```{r}
-if (!require("pacman")) install.packages("pacman")
-pacman::p_load_gh("trinker/entity")
+trump <- rbind(trump_us, trump_india, trump_twitter)
+par(mfrow=c(2,2))
+plot(trump$source, trump$afinn, ylab="Sentiment Score", xlab="Source", main="AFINN", col="red")
+plot(trump$source, trump$nrc, ylab="Sentiment Score", xlab="Source", main="NRC")
+plot(trump$source, trump$bing, ylab="Sentiment Score", xlab="Source", main="Bing")
+plot(trump$source, trump$syu, ylab="Sentiment Score", xlab="Source", main="Syuzhet")
+```
+
+## Section 4: Fake News Analysis
+This section is focused on building a fake news classifier. We downloaded a dataset from Kaggle that had labeled 40,000 articles are either real or fake. Since R stopped us from working with datasets so large, we decided to use 1000 real and 1000 fake news. 
+```{r}
+# Import libraries
+library(tm) # for NLP
+library(plyr) #  for pre-processing 
+library(tidyverse) # for pre-processing and visualisation
+library(reshape2) # for melt function
+library(e1071) # for Naive Bayes classifier
+library(glmnet) # for Logistic Regression classifier
+library(randomForest) # for Random Forest classifier
+library(tree)
 ```
 
 ```{r}
-library(entity)
-organizations <- organization_entity(results_in_16$results_df$description)
-plot(organizations)
+real <- read_csv('True.csv')
+real$type = "Real"
+real <- na.omit(mutate_all(real, ~ifelse(. %in% c("N/A", "null", ""),  NA, .))) #remove empty or NA rows
+real <- real[sample(nrow(real)),]
+real1 <- real %>%
+  slice(1000:1500)
+real <- real %>%
+  slice(1:1000)
 
+fake <- read_csv('fake.csv')
+fake$type = "Fake"
+fake <- na.omit(mutate_all(fake, ~ifelse(. %in% c("N/A", "null", ""),  NA, .))) #remove empty or NA rows
+fake <- fake[sample(nrow(fake)),]
+fake1 <- fake %>%
+  slice(1000:1500)
+fake <- fake %>%
+  slice(1:1000)
 ```
+
+```{r}
+# merge data frames and delete old data frames 
+news_df = rbind(real, fake)
+news_df <- news_df[sample(nrow(news_df)),] #shuffle rows
+news_df1 = rbind(real1, fake1)
+news_df1 <- news_df1[sample(nrow(news_df1)),]
+keep <- c("title","text","type")
+news_df = news_df[keep]
+news_df1 = news_df1[keep]
+```
+Before using the dataset, we clean the data and remove numbers, punctuation, special characters, etc and create a featues subset.  
+```{r}
+clean_text <- function(x){ 
+  gsub("…|⋆|–|‹|”|“|‘|’", " ", x) 
+}
+
+preprocess_corpus <- function(corpus){
+  # Convert the text to lower case
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  # Remove numbers
+  corpus <- tm_map(corpus, removeNumbers)
+  # Remove punctuations
+  corpus <- tm_map(corpus, removePunctuation)
+  # Remove special characters from text
+  corpus <- tm_map(corpus, clean_text)
+  # Remove english common stopwords
+  corpus <- tm_map(corpus, removeWords, stopwords("english"))
+  # Remove name of newspapers from the corpus
+  corpus <- tm_map(corpus, removeWords, c("eagle rising","freedom daily"))
+  # 'stem' words to root words
+  corpus <- tm_map(corpus,stemDocument)
+  # Eliminate extra white spaces
+  corpus <- tm_map(corpus, stripWhitespace)
+  return (corpus)
+}
+```
+We used the preprocess_corpus() function to process the title and body of the news articles and then converted the corpuses into document term matrixes. 
+```{r message=FALSE, warning=FALSE}
+# News title corpus
+title_corpus <- Corpus(VectorSource(news_df$title))
+# convert title corpus to document term matrix
+title_dtm <- DocumentTermMatrix(preprocess_corpus(title_corpus))
+```
+
+```{r message=FALSE, warning=FALSE}
+# News text body corpus
+body_corpus <- Corpus(VectorSource(news_df$text))
+# convert body corpus to document term matrix
+body_dtm <- DocumentTermMatrix(preprocess_corpus(body_corpus))
+```
+Then, we tokenized the bigrams using VCorpus. We used the top biograms to find the top phrases in the text body of the news articles. We then created a subset which includes the top 20 phrases and transformed that into a dataframe which consists of the phrases and their frequency in both categories.The matrix is visualized below:
+```{r}
+# function to tokenize bigrams
+BigramTokenizer <-
+  function(x)
+    unlist(lapply(ngrams(words(x), 2), paste, collapse = " "), use.names = FALSE)
+# corpus for bigrams
+corpus <- VCorpus(VectorSource(news_df$text))
+# corpus to document term matrix of bigrams
+bigram_matrix <- DocumentTermMatrix(corpus, control = list(tokenize = BigramTokenizer))
+# sort frequency of bigrams in decreasing order to give high frequency phrases
+bigram_freq <- sort(colSums(as.matrix(bigram_matrix)), decreasing=TRUE)
+```
+
+```{r}
+find_top_bigram <- function(bigrams, top_n){
+  top_bigram_list <- c()
+  for(bigram in bigrams){
+    unigrams <- strsplit(bigram," ")
+    if(!(unigrams[[1]][1] %in% stopwords("en") | unigrams[[1]][2]  %in% stopwords("en"))){
+      top_bigram_list <- c(top_bigram_list, bigram)
+    }
+    if (length(top_bigram_list) ==top_n){
+      break
+    }
+  }
+  return (top_bigram_list)
+}
+features_subset <- find_top_bigram(names(bigram_freq), 20)
+dtm_bigram_df <- data.frame(as.matrix(bigram_matrix[, intersect(colnames(bigram_matrix),features_subset)]))
+dtm_bigram_df$NewsType <- news_df$type
+cat_freq_bf_df <- dtm_bigram_df %>% group_by(NewsType) %>% summarise_each(funs(sum))
+```
+Based on the graph we can see there was more fake news surronding Trump than anyone else. The most amount of real news was about Rueters which can be due to the fact that the news titles or descriptions had the word Rueters in them.
+```{r}
+# plot high frequency bigrams in the body of news articles.
+ggplot(melt(cat_freq_bf_df),aes(x =variable, y=value,fill = NewsType)) + 
+  geom_col(position = "dodge") + coord_flip() + xlab("bigrams") + ylab("bigrams frequency") + ggtitle("High frequency bigrams in the body of news article") + theme_bw() 
+```
+
+### Train and test data split
+After some exploratory analysis, we moved on to training a fake news classifier. First, we split our data into training and test dataset on the proportion of 85% as training dataset and 15% as test dataset. Before training the classifier, we removed some terms that didn't appear very often and made body_dtm denser. We do three rounds of classifier trainings. In the first round, we train our classifier on just the titles of the articles, in the second round, we use the description of the article, and in the third round we use both.
+```{r}
+set.seed(123456)
+n_obs <- nrow(news_df)
+prop_split <- .85
+training_index <- sample(1:n_obs, round(n_obs * prop_split))
+```
+
+```{r}
+# Remove sparse terms 
+sparse_title_dtm <- removeSparseTerms(title_dtm, .99) 
+sparse_title_dtm 
+title_dtm <- as.matrix(sparse_title_dtm)
+# set train and test set for title dtm
+y_true <- as.matrix(news_df$type)
+x_train <- title_dtm[training_index, ]
+x_test <- title_dtm[-training_index, ]
+```
+
+### Round 1:
+
+### Naive Bayes Classifier on Title
+The accuracy was: 
+```{r}
+nb_title <- naiveBayes(x=x_train , y=as.factor(y_true[training_index]))
+predicted_rf_title <- predict(nb_title, x_test)
+accuracy_nb_title <- sum(y_true[-training_index] == predicted_rf_title)/ length(predicted_rf_title)
+accuracy_nb_title
+```
+### Logistic Regression Classifier on Title
+The accuracy was about the same and didn't change much compared to the Naive Bayes classifier..
+```{r}
+glm_fit_title <- glmnet(x_train , y_true[training_index], family = "binomial")
+predicted_glm_title <- predict(glm_fit_title, x_test, type = "class")
+accuracy_glm_title <- sum(y_true[-training_index] == predicted_glm_title)/ length(predicted_glm_title)
+accuracy_glm_title
+```
+
+### Random Forest Classifier on Title
+The Random Forest classifier gave us the highest accuracy rating. 
+```{r}
+set.seed(123)
+rf_title <- randomForest(x=x_train, y=as.factor(y_true[training_index]),ntree = 400)
+rf_title
+predicted_rf_title <- predict(rf_title, newdata=x_test)
+accuracy_rf_title <- sum(y_true[-training_index] == predicted_rf_title)/ length(predicted_rf_title)
+accuracy_rf_title
+```
+
+
+Before we started the next round of training, we made used the removeSparseTerms function to make the body denser. 
+
+
+```{r}
+sparse_body_dtm <- removeSparseTerms(body_dtm, 0.97)
+sparse_body_dtm
+body_dtm <- as.matrix(sparse_body_dtm)
+# set train and test set for body dtm
+y_true <- as.matrix(news_df$type)
+x_train_body <- body_dtm[training_index,]
+x_test_body <- body_dtm[-training_index, ]
+```
+
+### Round 2:
+
+### Naive Bayes Classifier - Description
+The accuracy came out to about 84.5% which is higher than the last round.
+```{r}
+nb_body <- naiveBayes(x=x_train_body , y=as.factor(y_true[training_index]))
+predicted_naive_body <- predict(nb_body, x_test_body)
+accuracy_naive_body <- sum(y_true[-training_index] == predicted_naive_body)/ length(predicted_naive_body)
+accuracy_naive_body
+```
+
+
+### Logistic Regression Classifier - Description
+The logistic classifier made a big jump to 98% accuracy.
+```{r}
+glm_fit_body <- glmnet(x_train_body , y_true[training_index], family = "binomial")
+predicted_glm_body <- predict(glm_fit_body, x_test_body, type = "class")
+accuracy_glm_body <- sum(y_true[-training_index] == predicted_glm_body)/ length(predicted_glm_body)
+accuracy_glm_body 
+```
+
+
+### Random Forest Classifier - Description
+The random forest got the highest accuracy yet again with an accuracy of 99%
+```{r}
+set.seed(123)
+rf_body <- randomForest(x=x_train_body, y=as.factor(y_true[training_index]))
+rf_body
+predicted_rf_body <- predict(rf_body, newdata=x_test_body)
+accuracy_rf_body <- sum(y_true[-training_index] == predicted_rf_body)/ length(predicted_rf_body)
+accuracy_rf_body
+```
+
+### Round 3:
+
+```{r}
+# combine title and body terms as feature matrix
+title_body_dtm <- body_dtm
+common_features <- intersect(colnames(body_dtm), colnames(title_dtm))
+title_body_dtm[,common_features] <- body_dtm[,common_features]+ title_dtm[,common_features]
+title_only_features <- setdiff(colnames(title_dtm), colnames(body_dtm))
+title_body_dtm <- cbind(title_body_dtm, title_dtm[,title_only_features])
+```
+
+### Naive Bayes Classifier - Both
+
+```{r}
+nb_body_tb <- naiveBayes(x=title_body_dtm[training_index, ] , y=as.factor(y_true[training_index]))
+predicted_nb_tb <- predict(nb_body, title_body_dtm[-training_index, ])
+accuracy_nb_tb <- sum(y_true[-training_index] == predicted_nb_tb)/ length(predicted_nb_tb)
+accuracy_nb_tb
+```
+
+The accuracy of the Naive Bayes classifier does not improve or changes even if we change the features. Let's try the other models, whether combining feature matrix improves their accuracy or not.
+
+### Logistic Regression Classifier - Both
+
+```{r}
+glm_fit_title_body <- glmnet(x=title_body_dtm[training_index, ] , y=y_true[training_index], family = "binomial")
+predicted_glm_tb <- predict(glm_fit_title_body, title_body_dtm[-training_index, ], type = "class")
+accuracy_glm_tb <- sum(y_true[-training_index] == predicted_glm_tb)/ length(predicted_glm_tb)
+accuracy_glm_tb 
+```
+
+
+### Random Forest Classifier - Both
+```{r}
+set.seed(123)
+rf_tb <- randomForest(x=title_body_dtm[training_index, ], y=as.factor(y_true[training_index]))
+predicted_rf_tb <- predict(rf_tb, newdata=title_body_dtm[-training_index, ])
+accuracy_rf_tb <- sum(y_true[-training_index] == predicted_rf_tb)/ length(predicted_rf_tb)
+accuracy_rf_tb 
+```
+As we can see, the best classification model was the random forest model with both the title and body matrix. 
+
+## Conclusion and limitations
+Based on this project, we saw the most common word and phrases used by news articles. We saw the most mentioned entities and calculated their sentiment scores. And finally we saw which entities had the most fake news surrounding them and built a fake news classifier to identify fake news.
+Initially we had planned to create a double key value store where we could've seen the sentiment of entities grouped by media houses. But since we didn't have enough news articles and creating a structure like that got too complicated, we limited to ourselves. A major limitation would be the data, our analysis was done on the data was the past couple of weeks and we didn't get data from a different set of sources. Moreover, the sentiment analysis methods yielded different results and it might be possible that the sentiment of the an entire article might not reflect the sentiment of all the entities mentioned in them. We would need a more sophisticated method to identify entities in every sentence and assign sentiment scores by every sentence. 
+If we had more time, we wanted to create a single database of media houses with every media house having a list of sentiment scores of entities they mentioned in their articles. This way, we would analyze the bias different media companies have against different entities. Morever, we wanted to use the fake news classifier to identify fake news on new data and assign a reliability score to every media company. We will continue working towards this, maybe in Python, but this was a great learning experience and we learned a great deal about data science through this class and this project. Thank you!
+
+
